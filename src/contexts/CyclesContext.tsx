@@ -1,13 +1,17 @@
-import { createContext, useState } from 'react'
-
-interface Cycle {
-  id: number
-  task: string
-  minutesAmount: string
-  startDate: Date
-  interruptDate?: Date
-  finishedDate?: Date
-}
+import {
+  ReactNode,
+  createContext,
+  useEffect,
+  useReducer,
+  useState,
+} from 'react'
+import { Cycle, cyclesReducer } from '../reducers/cycles/reducer'
+import {
+  addNewCycleAction,
+  interruptCurrentCycleAction,
+  markCurrentCycleAsFinishedAction,
+} from '../reducers/cycles/actions'
+import { differenceInSeconds } from 'date-fns'
 
 interface CreateCycleData {
   task: string
@@ -15,34 +19,65 @@ interface CreateCycleData {
 }
 
 interface CyclesContextType {
+  cycles: Cycle[]
   activeCycle: Cycle | undefined
   activeCycleId: string | null
-  markCurrentCycleAsFinished: () => void //melhor criar uma função, do que usar o "setAlgumaCoisa"
+  markCurrentCycleAsFinished: () => void
   amountSecondsPassed: number
   setSecondsPassed: (seconds: number) => void
   handleCreateNewCycle: (data: CreateCycleData) => void
   handleInterruptCycle: () => void
 }
 
-//precisa exportar para que os componentes possam usar
-export const CyclesContext = createContext({} as CyclesContextType) //cria o contexto
+// Exporta o contexto para que os componentes possam usá-lo
+export const CyclesContext = createContext({} as CyclesContextType)
 
-export function CyclesContextProvider() {
-  const [cycles, setCycles] = useState<Cycle[]>([])
-  const [activeCycleId, setActiveCycleId] = useState<string | null>(null)
-  const [amountSecondsPassed, setAmountSecondsPassed] = useState(0)
-  const activeCycle = cycles.find((cycle) => cycle.id == activeCycleId)
+interface CyclesContextProviderProps {
+  children: ReactNode // Diz que qualquer JSX válido pode ser passado
+}
+
+export function CyclesContextProvider({
+  children,
+}: CyclesContextProviderProps) {
+  // Corrigido aqui
+
+  // recebe o valor atual, e uma action (o que o usuário quer realizar de alteração na variável)
+  const [cyclesState, dispatch] = useReducer(
+    cyclesReducer,
+    {
+      cycles: [],
+      activeCycleId: null,
+    },
+    (initialState) => {
+      const storageStateAsJSON = localStorage.getItem(
+        '@ignite-timer:cyclesState',
+      )
+      if (storageStateAsJSON) {
+        return JSON.parse(storageStateAsJSON)
+      }
+      return initialState
+    },
+  )
+
+  const { cycles, activeCycleId } = cyclesState
+
+  const activeCycle = cycles.find((cycle) => cycle.id === activeCycleId)
+
+  const [amountSecondsPassed, setAmountSecondsPassed] = useState(() => {
+    if (activeCycle) {
+      return differenceInSeconds(new Date(), new Date(activeCycle?.startDate))
+    }
+
+    return 0
+  })
+
+  useEffect(() => {
+    const stateJSON = JSON.stringify(cyclesState)
+    localStorage.setItem('@ignite-timer:cyclesState', stateJSON)
+  }, [cyclesState])
 
   function markCurrentCycleAsFinished() {
-    setCycles((state) =>
-      state.map((c) => {
-        if (c.id == activeCycleId) {
-          return { ...c, finishedDate: new Date() }
-        } else {
-          return c
-        }
-      }),
-    )
+    dispatch(markCurrentCycleAsFinishedAction())
   }
 
   function setSecondsPassed(seconds: number) {
@@ -59,38 +94,29 @@ export function CyclesContextProvider() {
       startDate: new Date(),
     }
 
-    setCycles((state) => [...state, newCycle])
-    setActiveCycleId(id)
-    setAmountSecondsPassed(0)
+    dispatch(addNewCycleAction(newCycle))
 
-    //volta os campos para o valor original, do "defaultValues", linha 27.
-    reset()
+    setAmountSecondsPassed(0)
   }
 
   function handleInterruptCycle() {
-    setActiveCycleId(null)
-    setCycles((state) =>
-      state.map((c) => {
-        if (c.id == activeCycleId) {
-          return { ...c, interruptedDate: new Date() }
-        } else {
-          return c
-        }
-      }),
-    )
+    dispatch(interruptCurrentCycleAction())
   }
 
   return (
     <CyclesContext.Provider
       value={{
+        cycles,
         activeCycle,
         activeCycleId,
         markCurrentCycleAsFinished,
         amountSecondsPassed,
         setSecondsPassed,
         handleCreateNewCycle,
-        handleInterruptCycle
+        handleInterruptCycle,
       }}
-    ></CyclesContext.Provider>
+    >
+      {children}
+    </CyclesContext.Provider>
   )
 }
